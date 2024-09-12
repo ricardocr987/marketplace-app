@@ -348,25 +348,33 @@ export const SupabaseAdapter = (supabase: SupabaseClient): Adapter => {
 
     isAuthenticated: async (token: string) => {
       try {
-        const { payload: { sub } } = await jwtVerify(token, new TextEncoder().encode(config.SUPABASE_JWT_SECRET));
+        const { payload } = await jwtVerify(token, new TextEncoder().encode(config.SUPABASE_JWT_SECRET));
+        const { sub, exp } = payload;
+        
         if (!sub) {
           console.error('Invalid token: missing UUID');
           return false;
         }
-
+    
+        const currentTime = Math.floor(Date.now() / 1000);
+        if (exp && currentTime > exp) {
+          console.error('Token has expired');
+          return false;
+        }
+    
         const { data, error } = await supabase.rpc('get_claims', { uid: sub });
         if (error || !data) {
           console.error('User is not authenticated: invalid success claim');
           return false;
         }
-
+    
         return true;
       } catch (error) {
         console.error('Token validation failed:', error);
         return false;
       }
     },
-
+    
     setClaim: async (uid: string, claim: string, value: string) => {
       const { data, error } = await supabase.rpc('set_claim', { uid, claim, value });
       

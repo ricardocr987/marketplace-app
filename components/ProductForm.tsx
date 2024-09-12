@@ -70,7 +70,7 @@ export default function ProductForm() {
       });
 
       const result = await response.json();
-
+      
       if (result.status === 'Success') {
         toast({
           title: 'Product saved',
@@ -92,7 +92,7 @@ export default function ProductForm() {
   };
 
   return (
-    <Card className="w-full mt-28 max-w-4xl mx-auto">
+    <Card className="border-none">
       <CardHeader>
         <CardTitle>Product Details</CardTitle>
         <CardDescription>Define the details for your product here.</CardDescription>

@@ -39,16 +39,18 @@ export async function POST(req: NextRequest) {
             });
             if (authError) throw authError;
 
-            const { data: newUser, error: newUserError} = await supabase
+            let { data, error } = await supabase
                 .from('users')
-                .update({ address, id: authUser.user.id })
-                .eq('id', authUser.user.id)
+                .select('*')
+                .eq('address', address)
                 .single();
 
-            if (newUserError) throw newUserError;
+            if (error) throw authError;
 
-            user = newUser;
+            user = data
         }
+
+        if (!user) throw Error('Could not get user on login')
 
         const token = await supabaseAuthAdapter.generateToken(user.id);
 

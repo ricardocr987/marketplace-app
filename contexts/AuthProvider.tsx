@@ -67,9 +67,10 @@ const AuthContext = createContext<{
     connectedWallet: string | null;
     signIn: () => Promise<void>;
     signOut: () => Promise<void>;
+    checkAuthentication: () => Promise<void>;
 } | undefined>(undefined);
 
-export const AuthProvider = ({ children, initToken }: { children: ReactNode, initToken: string | undefined }) => {
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [state, dispatch] = useReducer(authReducer, initialState);
     const { publicKey, signMessage, disconnect, wallet } = useWallet();
     const cookies = useCookies();
@@ -84,7 +85,7 @@ export const AuthProvider = ({ children, initToken }: { children: ReactNode, ini
                 body: JSON.stringify({ address: publicKey.toBase58() }),
             };
 
-            const nonceResponse = await fetch('http://localhost:3000/api/auth/nonce', requestOptions);
+            const nonceResponse = await fetch('/api/auth/nonce', requestOptions);
             if (!nonceResponse.ok) throw new Error(`Failed to fetch nonce: ${nonceResponse.statusText}`);
 
             const { nonce } = await nonceResponse.json();
@@ -99,7 +100,7 @@ export const AuthProvider = ({ children, initToken }: { children: ReactNode, ini
                 body: JSON.stringify({ message: JSON.stringify(message), signature: serializedSignature }),
             };
 
-            const signInResponse = await fetch('http://localhost:3000/api/auth/login', signInRequestOptions);
+            const signInResponse = await fetch('/api/auth/login', signInRequestOptions);
             if (!signInResponse.ok) throw new Error(`Failed to sign in: ${signInResponse.statusText}`);
 
             const { token, user }: { token: string; user: User } = await signInResponse.json();
@@ -122,7 +123,7 @@ export const AuthProvider = ({ children, initToken }: { children: ReactNode, ini
                 headers: { 'Content-Type': 'application/json' },
             };
 
-            const logoutResponse = await fetch('http://localhost:3000/api/auth/logout', requestOptions);
+            const logoutResponse = await fetch('/api/auth/logout', requestOptions);
             if (!logoutResponse.ok) throw new Error(`Failed to logout: ${logoutResponse.statusText}`);
 
             await disconnect();
@@ -133,14 +134,13 @@ export const AuthProvider = ({ children, initToken }: { children: ReactNode, ini
         }
     }, [publicKey, state.token, disconnect, cookies]);
 
-    const getUser = useCallback(async () => {
-        // only get user data on auto-login
-        if (!initToken || !publicKey || state.user) return;
+    const getUser = useCallback(async (token: string) => {
+        if (!token || !publicKey || state.user) return;
 
         try {
-            const response = await fetch(`http://localhost:3000/api/user?address=${publicKey.toBase58()}`, {
+            const response = await fetch(`/api/user?address=${publicKey.toBase58()}`, {
                 method: 'GET',
-                headers: { 'Authorization': `Bearer ${initToken}` },
+                headers: { 'Authorization': `Bearer ${token}` },
             });
 
             if (!response.ok) throw new Error(`Failed to fetch user info: ${response.statusText}`);
@@ -148,29 +148,46 @@ export const AuthProvider = ({ children, initToken }: { children: ReactNode, ini
             const data = await response.json();
             const connectedWallet = wallet?.adapter.name || 'Unknown Wallet';
 
-            dispatch({ type: 'SIGN_IN', token: initToken, user: data.user, connectedWallet });
+            dispatch({ type: 'SIGN_IN', token, user: data.user, connectedWallet });
         } catch (error: any) {
             console.error("Failed to load user info:", error.message);
             dispatch({ type: 'SIGN_OUT' });
         }
-    }, [publicKey, wallet, state]);
+    }, [publicKey, wallet, state.user]);
 
-    // triggered by auto-login (already with the token cookie) and selecting a wallet
-    useEffect(() => {
-        if (state.user) return;
-
-        if (initToken) {
-            getUser();
-        } else {
-            signIn();
+    const checkAuthentication = useCallback(async () => {
+        try {
+            const response = await fetch('/api/auth/check', {
+                method: 'GET',
+            });
+            if (response.ok) {
+                const { token } = await response.json();
+                if (token) {
+                    await getUser(token);
+                } else if (publicKey) {
+                    await signIn();
+                } else {
+                    dispatch({ type: 'SIGN_OUT' });
+                }
+            } else {
+                dispatch({ type: 'SIGN_OUT' });
+            }
+        } catch (error) {
+            console.error('Error checking authentication:', error);
+            dispatch({ type: 'SIGN_OUT' });
         }
-    }, [getUser, signIn]);
+    }, [getUser, signIn, publicKey]);
+
+    useEffect(() => {
+        if (!state.user) checkAuthentication();
+    }, [checkAuthentication]);
 
     const contextValue = useMemo(() => ({
         ...state,
         signIn,
         signOut,
-    }), [state, signIn, signOut]);
+        checkAuthentication,
+    }), [state, signIn, signOut, checkAuthentication]);
 
     return (
         <AuthContext.Provider value={contextValue}>
