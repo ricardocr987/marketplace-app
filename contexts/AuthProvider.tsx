@@ -67,7 +67,6 @@ const AuthContext = createContext<{
     connectedWallet: string | null;
     signIn: () => Promise<void>;
     signOut: () => Promise<void>;
-    checkAuthentication: () => Promise<void>;
 } | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -79,37 +78,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (!signMessage || !publicKey || state.user) return;
 
         try {
-            const requestOptions = {
+            const nonceResponse = await fetch('/api/auth/nonce', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ address: publicKey.toBase58() }),
-            };
-
-            const nonceResponse = await fetch('/api/auth/nonce', requestOptions);
+            });
             if (!nonceResponse.ok) throw new Error(`Failed to fetch nonce: ${nonceResponse.statusText}`);
-
             const { nonce } = await nonceResponse.json();
+
             const message = new SignMessage({ publicKey: publicKey.toBase58(), statement: 'Sign in', nonce });
             const data = new TextEncoder().encode(message.prepare());
             const signature = await signMessage(data);
             const serializedSignature = bs58.encode(signature);
 
-            const signInRequestOptions = {
+            const signInResponse = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: JSON.stringify(message), signature: serializedSignature }),
-            };
-
-            const signInResponse = await fetch('/api/auth/login', signInRequestOptions);
+            });
             if (!signInResponse.ok) throw new Error(`Failed to sign in: ${signInResponse.statusText}`);
 
-            const { token, user }: { token: string; user: User } = await signInResponse.json();
+            const { token, user } = await signInResponse.json();
             cookies.set('token', token);
             const connectedWallet = wallet?.adapter.name || 'Unknown Wallet';
 
             dispatch({ type: 'SIGN_IN', token, user, connectedWallet });
         } catch (error: any) {
-            disconnect();
+            await disconnect();
             console.error("Sign in error:", error.message);
         }
     }, [publicKey, signMessage, wallet, state.user, cookies, disconnect]);
@@ -118,12 +113,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (!publicKey || !state.token) return;
 
         try {
-            const requestOptions = {
+            const logoutResponse = await fetch('/api/auth/logout', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-            };
-
-            const logoutResponse = await fetch('/api/auth/logout', requestOptions);
+            });
             if (!logoutResponse.ok) throw new Error(`Failed to logout: ${logoutResponse.statusText}`);
 
             await disconnect();
@@ -151,26 +144,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             dispatch({ type: 'SIGN_IN', token, user: data.user, connectedWallet });
         } catch (error: any) {
             console.error("Failed to load user info:", error.message);
+            await disconnect();
             dispatch({ type: 'SIGN_OUT' });
         }
     }, [publicKey, wallet, state.user]);
 
-    const checkAuthentication = useCallback(async () => {
+    const checkAuth = useCallback(async () => {
         try {
-            const response = await fetch('/api/auth/check', {
-                method: 'GET',
-            });
-            if (response.ok) {
-                const { token } = await response.json();
-                if (token) {
-                    await getUser(token);
-                } else if (publicKey) {
-                    await signIn();
-                } else {
-                    dispatch({ type: 'SIGN_OUT' });
-                }
-            } else {
-                dispatch({ type: 'SIGN_OUT' });
+            const token = cookies.get('token');
+            if (token && publicKey) {
+                await getUser(token);
+            } else if (publicKey) {
+                await signIn();
             }
         } catch (error) {
             console.error('Error checking authentication:', error);
@@ -179,15 +164,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }, [getUser, signIn, publicKey]);
 
     useEffect(() => {
-        if (!state.user) checkAuthentication();
-    }, [checkAuthentication]);
+        checkAuth();
+    }, [checkAuth]);
 
     const contextValue = useMemo(() => ({
         ...state,
         signIn,
         signOut,
-        checkAuthentication,
-    }), [state, signIn, signOut, checkAuthentication]);
+    }), [state, signIn, signOut]);
 
     return (
         <AuthContext.Provider value={contextValue}>

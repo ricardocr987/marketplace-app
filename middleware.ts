@@ -1,5 +1,5 @@
 import { supabaseAuthAdapter } from '@/lib/supabase';
-import { NextRequest, NextResponse } from 'next/server';
+import { type NextRequest, NextResponse } from 'next/server';
 
 export default async function middleware(request: NextRequest) {
     const token = request.cookies.get('token')?.value;
